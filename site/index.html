@@ -795,6 +795,8 @@
 
 </main>
 
+<audio id="song" src="music.mp3" preload="auto" loop playsinline></audio>
+
 <button id="kuy" type="button" aria-pressed="false" aria-label="Күй қосу">
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
     <path d="M7 14.5V4.5l8-2v10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -920,6 +922,40 @@
   }
   window.addEventListener('scroll', onScroll, { passive:true });
 
+  /* ---------- автоскролл: әр 10 секунд сайын келесі бөлімге ---------- */
+  (function(){
+    var STEP = 10000, timer = null, autoMoving = false, moveT = null;
+    var secs = Array.prototype.slice.call(document.querySelectorAll('section'));
+
+    function nextTarget(){
+      var y = window.scrollY, vh = window.innerHeight || 800;
+      for (var i = 0; i < secs.length; i++){
+        var top = secs[i].getBoundingClientRect().top + y - 20;
+        if (top > y + 40) return Math.min(top, y + vh * 0.9);
+      }
+      var max = document.documentElement.scrollHeight - vh;
+      return y < max - 4 ? Math.min(max, y + vh * 0.9) : null;
+    }
+    function step(){
+      var to = nextTarget();
+      if (to === null){ timer = null; return; }       /* соңына жеттік */
+      autoMoving = true;
+      clearTimeout(moveT);
+      moveT = setTimeout(function(){ autoMoving = false; }, 1500);
+      window.scrollTo({ top: to, behavior: reduce ? 'auto' : 'smooth' });
+      arm();
+    }
+    function arm(){ clearTimeout(timer); timer = setTimeout(step, STEP); }
+
+    /* адам өзі айналдырса — санақ қайта басталады */
+    function userMove(){ if (!autoMoving) arm(); }
+    ['wheel','touchstart','keydown'].forEach(function(t){
+      window.addEventListener(t, userMove, { passive:true });
+    });
+
+    setTimeout(arm, reduce ? 0 : 2700);   /* перде ашылғаннан кейін */
+  })();
+
   /* ---------- домбыра күйі (Karplus–Strong) ---------- */
   (function(){
     var btn = document.getElementById('kuy');
@@ -962,7 +998,39 @@
       step++;
     }
 
+    var song = document.getElementById('song');
+    var songOk = !!(song && song.canPlayType && song.canPlayType('audio/mpeg'));
+    if (song) song.addEventListener('error', function(){ songOk = false; if (playing){ playing = false; start(); } });
+    var fadeT = null;
+    function fadeSong(to, ms, done){
+      clearInterval(fadeT);
+      var from = song.volume, t = 0, n = Math.max(1, Math.round(ms / 50));
+      fadeT = setInterval(function(){
+        t++;
+        song.volume = Math.max(0, Math.min(1, from + (to - from) * t / n));
+        if (t >= n){ clearInterval(fadeT); if (done) done(); }
+      }, 50);
+    }
+
+    function setOn(on){
+      playing = on;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.setAttribute('aria-label', on ? 'Күйді өшіру' : 'Күй қосу');
+    }
+
     function start(){
+      if (songOk){
+        song.volume = 0;
+        var pr = song.play();
+        setOn(true);
+        fadeSong(0.85, 1200);
+        if (pr && pr.catch) pr.catch(function(err){
+          if (err && err.name === 'NotAllowedError'){ setOn(false); return; }
+          songOk = false; playing = false; start();
+        });
+        return;
+      }
       if (!actx){
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
@@ -984,6 +1052,9 @@
     }
 
     function stop(){
+      if (songOk && song && !song.paused){
+        fadeSong(0, 700, function(){ song.pause(); });
+      }
       if (timer){ clearInterval(timer); timer = null; }
       if (master){
         master.gain.cancelScheduledValues(actx.currentTime);
@@ -996,7 +1067,16 @@
       btn.setAttribute('aria-label', 'Күй қосу');
     }
 
-    btn.addEventListener('click', function(){ playing ? stop() : start(); });
+    var touched = false;   /* қолмен өшірілсе, қайта қоспаймыз */
+    btn.addEventListener('click', function(){ touched = true; playing ? stop() : start(); });
+
+    /* браузер дыбысты алғашқы жанасудан кейін ғана рұқсат етеді */
+    function firstTouch(e){
+      ['pointerdown','touchend','keydown'].forEach(function(t){ document.removeEventListener(t, firstTouch, true); });
+      if (touched || playing || (e && e.target && e.target.closest && e.target.closest('#kuy'))) return;
+      start();
+    }
+    ['pointerdown','touchend','keydown'].forEach(function(t){ document.addEventListener(t, firstTouch, true); });
     document.addEventListener('visibilitychange', function(){
       if (document.hidden && playing) stop();
     });
