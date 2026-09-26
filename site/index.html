@@ -377,6 +377,19 @@
     transition:opacity 1.2s ease, visibility 1.2s ease;
   }
   #veil.done{ opacity:0; visibility:hidden; }
+  #veil.wait{ cursor:pointer; }
+  #veil .vopen{
+    position:absolute; bottom:clamp(24px,11vh,96px);
+    font-family:"PT Sans", sans-serif; font-size:.72rem;
+    letter-spacing:.28em; text-transform:uppercase;
+    color:var(--gold); background:transparent;
+    border:1px solid rgba(211,176,114,.6); border-radius:999px;
+    padding:13px 26px; cursor:pointer;
+    opacity:0; visibility:hidden; transition:opacity .8s ease, visibility .8s ease;
+  }
+  #veil.wait .vopen{ opacity:1; visibility:visible; animation:vpulse 2.2s ease-in-out infinite; }
+  #veil .vopen:focus-visible{ outline:2px solid var(--gold); outline-offset:3px; }
+  @keyframes vpulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(211,176,114,.0); } 50%{ box-shadow:0 0 0 8px rgba(211,176,114,.12); } }
   #veil svg{ width:clamp(140px,40vw,180px); height:auto; }
   #veil .vn{
     position:absolute; bottom:clamp(70px,22vh,180px);
@@ -579,7 +592,7 @@
 <svg class="rail l" aria-hidden="true"><rect width="26" height="100%" fill="url(#oyuRail)"/></svg>
 <svg class="rail r" aria-hidden="true"><rect width="26" height="100%" fill="url(#oyuRail)"/></svg>
 
-<div id="veil" aria-hidden="true">
+<div id="veil">
   <svg viewBox="0 0 160 160" fill="none">
     <circle cx="80" cy="80" r="60" stroke="currentColor" stroke-width=".9" pathLength="1"/>
     <circle class="s2" cx="80" cy="80" r="50" stroke="currentColor" stroke-width=".7" opacity=".55" pathLength="1"/>
@@ -589,6 +602,7 @@
           stroke="currentColor" stroke-width=".8" pathLength="1"/>
   </svg>
   <p class="vn">Ислам &amp; Анель</p>
+  <button class="vopen" type="button">Шақыруды ашу ♪</button>
 </div>
 
 <main class="page">
@@ -795,7 +809,7 @@
 
 </main>
 
-<audio id="song" src="music.mp3" preload="none" loop playsinline></audio>
+<audio id="song" src="music.mp3" preload="auto" loop playsinline></audio>
 
 <button id="kuy" type="button" aria-pressed="false" aria-label="Күй қосу">
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -816,12 +830,16 @@
 
   /* кіріспе перде */
   var veil = document.getElementById('veil');
+  var opened = false;
   function openPage(){
+    if (opened) return;
+    opened = true;
+    document.dispatchEvent(new Event('invite:open'));
     if (!veil) return;
+    veil.classList.remove('wait');
     veil.classList.add('done');
     setTimeout(function(){ if (veil && veil.parentNode) veil.parentNode.removeChild(veil); }, 1400);
   }
-  if (reduce){ openPage(); } else { setTimeout(openPage, 2700); }
 
   /* сөздерді бөлшектеу */
   function splitWords(root){
@@ -953,7 +971,7 @@
       window.addEventListener(t, userMove, { passive:true });
     });
 
-    setTimeout(arm, reduce ? 0 : 2700);   /* перде ашылғаннан кейін */
+    document.addEventListener('invite:open', function(){ setTimeout(arm, reduce ? 0 : 1200); });
   })();
 
   /* ---------- домбыра күйі (Karplus–Strong) ---------- */
@@ -1020,6 +1038,7 @@
     }
 
     function start(){
+      if (playing) return;
       if (songOk){
         song.volume = 0;
         var pr = song.play();
@@ -1070,13 +1089,36 @@
     var touched = false;   /* қолмен өшірілсе, қайта қоспаймыз */
     btn.addEventListener('click', function(){ touched = true; playing ? stop() : start(); });
 
-    /* браузер дыбысты алғашқы жанасудан кейін ғана рұқсат етеді */
+    /* ашылғанда бірден ойнатып көреміз; браузер бөгесе — алғашқы жанасуда */
+    var gestures = ['touchend','click','keydown'];
     function firstTouch(e){
-      ['pointerdown','touchend','keydown'].forEach(function(t){ document.removeEventListener(t, firstTouch, true); });
       if (touched || playing || (e && e.target && e.target.closest && e.target.closest('#kuy'))) return;
       start();
     }
-    ['pointerdown','touchend','keydown'].forEach(function(t){ document.addEventListener(t, firstTouch, true); });
+    gestures.forEach(function(t){ document.addEventListener(t, firstTouch, true); });
+
+    var veil = document.getElementById('veil');
+    function waitForTap(){
+      if (!veil || reduce){ openPage(); return; }
+      veil.classList.add('wait');
+      veil.addEventListener('click', function(){ openPage(); });
+    }
+    function autoplay(){
+      var t0 = Date.now();
+      var after = function(fn){ setTimeout(fn, Math.max(0, (reduce ? 0 : 2700) - (Date.now() - t0))); };
+      if (!songOk || !song){ after(waitForTap); return; }
+      song.volume = 0;
+      var pr;
+      try { pr = song.play(); } catch(e){ pr = null; }
+      if (!pr || !pr.then){ after(waitForTap); return; }
+      pr.then(function(){
+        setOn(true);
+        fadeSong(0.85, 1500);
+        after(openPage);
+      }).catch(function(){ after(waitForTap); });
+    }
+    autoplay();
+
     document.addEventListener('visibilitychange', function(){
       if (document.hidden && playing) stop();
     });
